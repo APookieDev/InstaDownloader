@@ -7,7 +7,7 @@ from threading import Thread
 import time
 
 # Directory to store downloaded images
-DOWNLOAD_DIR = "downloads"
+DOWNLOAD_DIR = "/tmp/downloads"  # Use /tmp for temporary file storage
 if not os.path.exists(DOWNLOAD_DIR):
     os.makedirs(DOWNLOAD_DIR)
 
@@ -77,4 +77,5 @@ def download():
         return jsonify({"error": zip_filepath}), 500
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    # Use 'host="0.0.0.0"' for Render
+    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
