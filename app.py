@@ -37,6 +37,8 @@ def download_images(url):
         # Download the images directly into the 'downloads' folder
         loader.download_post(post, target=DOWNLOAD_DIR)
 
+        time.sleep(2)
+
         # Create a ZIP file containing all the downloaded image files
         zip_filename = f"{shortcode}.zip"
         zip_filepath = os.path.join(DOWNLOAD_DIR, zip_filename)
@@ -49,9 +51,14 @@ def download_images(url):
                         file_path = os.path.join(root, file)
                         zipf.write(file_path, arcname=os.path.relpath(file_path, DOWNLOAD_DIR))
 
+
+        time.sleep(3)
+        
         # Start cleanup in a background thread to avoid blocking
         cleanup_thread = Thread(target=cleanup, args=(zip_filepath,))
         cleanup_thread.start()
+
+        time.sleep(2)
 
         return zip_filepath  # Return the path to the ZIP file
 
