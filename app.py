@@ -1,88 +1,138 @@
 import os
-import instaloader
-import zipfile
 import shutil
-from flask import Flask, request, send_file, render_template, jsonify
-from threading import Thread
-import time
-
-# Directory to store downloaded images
-DOWNLOAD_DIR = "/tmp/downloads"  # Use /tmp for temporary file storage
-if not os.path.exists(DOWNLOAD_DIR):
-    os.makedirs(DOWNLOAD_DIR)
+import tempfile
+import zipfile
+import uuid
+import requests
+from flask import Flask, render_template, request, send_file
+import instaloader
+import re
 
 app = Flask(__name__)
 
-# Helper function for cleanup
-def cleanup(zip_filepath):
+def sanitize_filename(filename):
+    """Create a safe filename by removing invalid characters."""
+    return re.sub(r'[^\w\-_\. ]', '_', filename)
+
+def download_instagram_post(post_url):
+    """
+    Download images from an Instagram post
+    Returns:
+    - Temporary directory path with downloaded images
+    - List of downloaded filenames
+    """
+    L = instaloader.Instaloader(
+        download_pictures=True,
+        download_videos=True,
+        download_video_thumbnails=False,
+        download_geotags=False,
+        download_comments=False
+    )
+    
+    # Extract shortcode from URL
+    shortcode = post_url.split('/')[-2] if 'instagram.com/p/' in post_url else post_url
+    
+    # Temporary directory for this download session
+    temp_dir = tempfile.mkdtemp(prefix='insta_download_')
+    
     try:
-        time.sleep(2)  # Allow time for file download to complete
-        os.remove(zip_filepath)  # Remove the zip file
-        shutil.rmtree(DOWNLOAD_DIR)  # Remove the downloads folder
-    except Exception as cleanup_error:
-        print(f"Error during cleanup: {cleanup_error}")
-
-# Function to download images and create the zip file
-def download_images(url):
-    try:
-        # Initialize Instaloader
-        loader = instaloader.Instaloader()
-
-        # Extract the shortcode from the URL
-        shortcode = url.split('/')[-2]
-
-        # Fetch the post using the shortcode
-        post = instaloader.Post.from_shortcode(loader.context, shortcode)
-
-        # Download the images directly into the 'downloads' folder
-        loader.download_post(post, target=DOWNLOAD_DIR)
-
-        time.sleep(2)
-
-        # Create a ZIP file containing all the downloaded image files
-        zip_filename = f"{shortcode}.zip"
-        zip_filepath = os.path.join(DOWNLOAD_DIR, zip_filename)
-
-        # Create the ZIP file
-        with zipfile.ZipFile(zip_filepath, 'w') as zipf:
-            for root, dirs, files in os.walk(DOWNLOAD_DIR):
-                for file in files:
-                    if file.endswith('.jpg') or file.endswith('.png'):  # Only include image files
-                        file_path = os.path.join(root, file)
-                        zipf.write(file_path, arcname=os.path.relpath(file_path, DOWNLOAD_DIR))
-
-
-        time.sleep(3)
+        # Get the post
+        post = instaloader.Post.from_shortcode(L.context, shortcode)
         
-        # Start cleanup in a background thread to avoid blocking
-        cleanup_thread = Thread(target=cleanup, args=(zip_filepath,))
-        cleanup_thread.start()
-
-        time.sleep(2)
-
-        return zip_filepath  # Return the path to the ZIP file
-
+        # Track downloaded filenames
+        downloaded_files = []
+        
+        # Check if it's a multi-image post
+        if post.typename == 'GraphSidecar':
+            # Download multiple images/videos
+            for i, item in enumerate(post.get_sidecar_nodes()):
+                # Determine file extension
+                ext = 'mp4' if item.is_video else 'jpg'
+                
+                # Create unique filename
+                filename = sanitize_filename(f'{shortcode}_{i+1}.{ext}')
+                filepath = os.path.join(temp_dir, filename)
+                
+                # Download image or video
+                if item.is_video:
+                    # Use display_url for thumbnail, video_url for actual video
+                    image_url = item.display_url
+                    video_url = item.video_url
+                    
+                    # Download video
+                    response = requests.get(video_url)
+                    with open(filepath, 'wb') as f:
+                        f.write(response.content)
+                else:
+                    # Use display_url for images
+                    image_url = item.display_url
+                    response = requests.get(image_url)
+                    with open(filepath, 'wb') as f:
+                        f.write(response.content)
+                
+                downloaded_files.append(filename)
+        else:
+            # Single image/video post
+            ext = 'mp4' if post.is_video else 'jpg'
+            filename = sanitize_filename(f'{shortcode}.{ext}')
+            filepath = os.path.join(temp_dir, filename)
+            
+            # Download image or video
+            if post.is_video:
+                # Use display_url for thumbnail, video_url for actual video
+                image_url = post.display_url
+                video_url = post.video_url
+                response = requests.get(video_url)
+            else:
+                # Use display_url for images
+                image_url = post.display_url
+                response = requests.get(image_url)
+            
+            with open(filepath, 'wb') as f:
+                f.write(response.content)
+            
+            downloaded_files.append(filename)
+        
+        return temp_dir, downloaded_files
+    
     except Exception as e:
-        return str(e)
+        # Clean up temporary directory if download fails
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        raise
 
-@app.route('/')
+@app.route('/', methods=['GET'])
 def index():
     return render_template('index.html')
 
 @app.route('/download', methods=['POST'])
-def download():
-    url = request.form.get('url')
+def download_images():
+    post_url = request.form.get('post_url')
     
-    if not url:
-        return jsonify({"error": "URL is required"}), 400
+    try:
+        # Download images
+        temp_dir, downloaded_files = download_instagram_post(post_url)
+        
+        # Create a zip file
+        zip_filename = f'instagram_download_{uuid.uuid4().hex}.zip'
+        zip_path = os.path.join(tempfile.gettempdir(), zip_filename)
+        
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+            for filename in downloaded_files:
+                zipf.write(os.path.join(temp_dir, filename), filename)
+        
+        # Clean up temporary download directory
+        shutil.rmtree(temp_dir, ignore_errors=True)
+        
+        # Send zip file for download
+        return send_file(
+            zip_path, 
+            as_attachment=True, 
+            download_name=zip_filename,
+            mimetype='application/zip'
+        )
     
-    zip_filepath = download_images(url)
-
-    if zip_filepath.endswith('.zip'):
-        return send_file(zip_filepath, as_attachment=True)
-    else:
-        return jsonify({"error": zip_filepath}), 500
+    except Exception as e:
+        return str(e), 400
 
 if __name__ == '__main__':
-    # Use 'host="0.0.0.0"' for Render
-    app.run(debug=True, host='0.0.0.0', port=int(os.environ.get('PORT', 5000)))
+    app.run(debug=True)
