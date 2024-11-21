@@ -2,65 +2,109 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Instagram Image Downloader</title>
+    <title>Instagram Media Downloader</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
+            max-width: 500px;
+            margin: 20px auto;
+            padding: 20px;
+            text-align: center;
             background-color: #f4f4f4;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            height: 100vh;
         }
         .container {
-            background: white;
-            padding: 20px;
+            background-color: white;
             border-radius: 8px;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-            width: 300px;
-            text-align: center;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
-        .container h2 {
-            margin-bottom: 20px;
-        }
-        input[type="text"] {
+        input, button {
             width: 100%;
             padding: 10px;
             margin: 10px 0;
-            border: 1px solid #ccc;
-            border-radius: 4px;
+            box-sizing: border-box;
         }
         button {
-            background-color: #28a745;
+            background-color: #4CAF50;
             color: white;
             border: none;
-            padding: 10px 20px;
             cursor: pointer;
-            border-radius: 4px;
+            transition: background-color 0.3s;
         }
         button:hover {
-            background-color: #218838;
+            background-color: #45a049;
         }
-        .error {
+        #error {
             color: red;
-            font-size: 14px;
+            margin-top: 10px;
+        }
+        #loading {
+            display: none;
+            color: #666;
+            margin-top: 10px;
         }
     </style>
 </head>
 <body>
+    <div class="container">
+        <h1>Instagram Media Downloader</h1>
+        <form id="downloadForm">
+            <input 
+                type="text" 
+                id="postUrl" 
+                name="post_url" 
+                placeholder="Paste Instagram Post URL" 
+                required
+            >
+            <button type="submit">Download Media</button>
+        </form>
+        <div id="loading">Downloading... Please wait</div>
+        <div id="error"></div>
+    </div>
 
-<div class="container">
-    <h2>Instagram Image Downloader</h2>
-    <form action="/download" method="POST">
-        <input type="text" name="url" placeholder="Enter Instagram Post URL" required>
-        <br>
-        <button type="submit">Download Images</button>
-    </form>
-    <div id="error-message" class="error"></div>
-</div>
+    <script>
+        document.getElementById('downloadForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const postUrl = document.getElementById('postUrl').value;
+            const errorDiv = document.getElementById('error');
+            const loadingDiv = document.getElementById('loading');
+            
+            // Reset previous state
+            errorDiv.textContent = '';
+            loadingDiv.style.display = 'block';
 
+            const formData = new FormData();
+            formData.append('post_url', postUrl);
+
+            fetch('/download', {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => {
+                loadingDiv.style.display = 'none';
+                
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(text);
+                    });
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.style.display = 'none';
+                a.href = url;
+                a.download = 'instagram_media.zip';
+                document.body.appendChild(a);
+                a.click();
+                window.URL.revokeObjectURL(url);
+            })
+            .catch(error => {
+                loadingDiv.style.display = 'none';
+                errorDiv.textContent = `Error: ${error.message}`;
+            });
+        });
+    </script>
 </body>
 </html>
